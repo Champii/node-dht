@@ -1,0 +1,15 @@
+{
+  "name": "dhtcloud",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bitwise-xor": "0.0.0",
+    "prelude-ls": "^1.1.2"
+  }
+}
