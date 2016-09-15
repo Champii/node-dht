@@ -1,5 +1,5 @@
 {
-  "name": "dhtcloud",
+  "name": "node-dht",
   "version": "0.0.1",
   "description": "",
   "main": "index.js",
