@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "async": "^2.0.1",
     "bitwise-xor": "0.0.0",
     "prelude-ls": "^1.1.2"
   }

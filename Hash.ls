@@ -29,4 +29,9 @@ class Hash
   @Deserialize = ->
     new @ it.value.data
 
+  @Create = ->
+    hash = crypto.createHash \sha1
+    hash.update it
+    new @ hash.digest!
+
 module.exports = Hash

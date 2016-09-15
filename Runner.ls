@@ -26,6 +26,16 @@ class Runner
       | '' => process.stdout.write '> '
       | _  => process.stdout.write "Unknown command. Type 'h' for help\n> "
 
+  DisplayHelp: ->
+    console.log "
+       h           -- help    -- Display this help                   \n
+       g KEY       -- get     -- Get a value from a key              \n
+       p KEY VALUE -- put     -- Put a key/value pair                \n
+       s           -- storage -- Display localy stored keys/values   \n
+       r           -- routing -- Display local routing table
+    "
+    process.stdout.write '> '
+
   DisplayStore: ->
     for k, value of @node.store
       console.log "#k : #value"
@@ -40,10 +50,7 @@ class Runner
   Put: ([, key, value]) ->
     return process.stdout.write 'Invalid syntax: > p key value\n> ' if not key? or not value?
 
-    hash = crypto.createHash \sha1
-    hash.update key
-    hash = new Hash hash.digest!
-    @node.Store hash, value, (err, value) ->
+    @node.Store key, value, (err, value) ->
       return console.error err if err?
 
       console.log value
@@ -52,16 +59,9 @@ class Runner
   Get: ([, key]) ->
     return console.error 'Invalid syntax: > g key' if not key?
 
-    hash = crypto.createHash \sha1
-    hash.update key
-    hash = new Hash hash.digest!
-    @node.FindValue hash, (err, bucket, value) ->
+    @node.FindValue key, (err, bucket, value) ->
       return process.stdout.write 'Not found\n> ' if bucket? or err?
       console.log "#key : #value" if value?
       process.stdout.write '> '
-
-
-
-
 
 new Runner process.argv[2], process.argv[3], process.argv[4]

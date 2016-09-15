@@ -38,16 +38,18 @@ class DhtNode
   Bootstrap: (ip, port) ->
     node = new Node ip, port, null, @
     node.Ping (err) ~>
-      console.log 'Bootstrap start'
+      # console.log 'Bootstrap start'
       return console.error err if err?
 
       @Find @hash, \FindNode (err, bucket) ~>
-        console.log 'Bootstrap Finish'
+        # console.log 'Bootstrap Finish'
 
   FindNode: (hash, done) ->
     @Find hash, \FindNode, done
 
-  FindValue: (hash, done) ->
+  FindValue: (key, done) ->
+    hash = Hash.Create key
+
     @Find hash, \FindValue, done
 
   Find: (hash, method, finalDone) ->
@@ -91,11 +93,13 @@ class DhtNode
       finalDone null, best
 
   Store: (key, value, done) ->
-    @FindNode key, (err, bucket) ~>
+    hash = Hash.Create key
+
+    @FindNode hash, (err, bucket) ~>
       return done err if err?
 
       async.map bucket, (node, done) ~>
-        node.Store key, value, (err, res) -> done null err || res
+        node.Store hash, value, (err, res) -> done null err || res
       , (err, res) ->
         done null, "Ok (#{filter (-> it is \Ok ), res .length})"
 

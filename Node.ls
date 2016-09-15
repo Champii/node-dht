@@ -53,8 +53,8 @@ class Node
   Serialize: ->
     @{hash, ip, port}
 
-  @Deserialize = (it, self) ->
-    new @ it.ip, it.port, (new Hash it.hash.value.data), self
+  @Deserialize = (sender, self) ->
+    new @ sender.ip, sender.port, (new Hash sender.hash.value.data), self
 
 
 module.exports = Node
