@@ -1,6 +1,6 @@
 require! {
   crypto
-  \./ : node
+  \./ : Dht
   \./Hash
 }
 
@@ -9,7 +9,7 @@ class Runner
   (@port = 12345, bootstrapIp, bootstrapPort) ->
     # @node = new DhtNode @port, bootstrapIp, bootstrapPort
 
-    @node = node
+    @node = new Dht @port, bootstrapIp, bootstrapPort
     process.stdout.write '> '
     process.stdin.on \data @~Dispatch
 
@@ -38,19 +38,20 @@ class Runner
 
   DisplayStore: ->
     for k, value of @node.store
-      console.log "#k : #value"
+      console.log "#{k} : #{value}"
     process.stdout.write '> '
 
   DisplayRouting: ->
     for bucket, i in @node.routing.lists
       for node in bucket
-        console.log "#i : #{node.hash.value.toString \hex }"
+        console.log "#{i} : #{node.hash.value.toString \hex }"
     process.stdout.write '> '
 
   Put: ([, key, value]) ->
     return process.stdout.write 'Invalid syntax: > p key value\n> ' if not key? or not value?
 
-    @node.Store key, value, (err, value) ->
+    hash = Hash.Create key
+    @node.Store hash, value, (err, value) ->
       return console.error err if err?
 
       console.log value
@@ -59,9 +60,10 @@ class Runner
   Get: ([, key]) ->
     return console.error 'Invalid syntax: > g key' if not key?
 
-    @node.FindValue key, (err, bucket, value) ->
+    hash = Hash.Create key
+    @node.FindValue hash, (err, bucket, value) ->
       return process.stdout.write 'Not found\n> ' if bucket? or err?
-      console.log "#key : #value" if value?
+      console.log "#{key} : #{value}" if value?
       process.stdout.write '> '
 
 new Runner process.argv[2], process.argv[3], process.argv[4]

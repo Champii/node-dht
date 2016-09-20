@@ -3,12 +3,13 @@ global import require \prelude-ls
 require! {
   net
   async
+  events : EventEmitter
   \./Hash
   \./Routing
   \./Node
 }
 
-class DhtNode
+class DhtNode extends EventEmitter
 
   (@port = 12345, bootstrapIp, bootstrapPort) ->
     @store = {}
@@ -18,7 +19,7 @@ class DhtNode
     # process.on 'uncaughtException' @~ExitHandler
 
     @hash = Hash.CreateRandom!
-    console.log "Own hash: " @hash
+    # console.log "Own hash: " @hash
     @routing = new Routing @
 
     @server = net.createServer ~>
@@ -33,7 +34,7 @@ class DhtNode
   ExitHandler: ->
     console.log it.stack
     # Redispatch stored
-    process.exit!
+    # process.exit!
 
   Bootstrap: (ip, port) ->
     node = new Node ip, port, null, @
@@ -42,15 +43,16 @@ class DhtNode
       return console.error err if err?
 
       @Find @hash, \FindNode (err, bucket) ~>
+        @emit \bootstraped
         # console.log 'Bootstrap Finish'
 
   FindNode: (hash, done) ->
     @Find hash, \FindNode, done
 
   FindValue: (key, done) ->
-    hash = Hash.Create key
+    # hash = Hash.Create key
 
-    @Find hash, \FindValue, done
+    @Find key, \FindValue, done
 
   Find: (hash, method, finalDone) ->
     bucket = @routing.FindNode hash
@@ -93,13 +95,13 @@ class DhtNode
       finalDone null, best
 
   Store: (key, value, done) ->
-    hash = Hash.Create key
+    # hash = Hash.Create key
 
-    @FindNode hash, (err, bucket) ~>
+    @FindNode key, (err, bucket) ~>
       return done err if err?
 
       async.map bucket, (node, done) ~>
-        node.Store hash, value, (err, res) -> done null err || res
+        node.Store key, value, (err, res) -> done null err || res
       , (err, res) ->
         done null, "Ok (#{filter (-> it is \Ok ), res .length})"
 
@@ -132,6 +134,7 @@ class DhtNode
             @Send client, msg: \FOUND_VALUE value: key: it.value, value: value
           else if bucket?
             @Send client, msg: \FOUND_NODE value: map (.Serialize!), bucket
+        | _           => @emit \unknownMsg, it
 
     client.on \error console.error
 
@@ -139,4 +142,6 @@ class DhtNode
     obj.sender = @{hash, port} <<< ip: \localhost
     client.write JSON.stringify obj
 
-module.exports = new DhtNode process.argv[2], process.argv[3], process.argv[4]
+DhtNode.Hash = Hash
+
+module.exports = DhtNode

@@ -7,7 +7,9 @@ class Hash
 
   @LENGTH = 160
 
-  (@value) -> @value = new Buffer @value
+  (@value) ->
+    if not Buffer.isBuffer @value
+      @value = new Buffer @value, \hex
 
   CountSameBits: (hash) ->
     count = 0
@@ -23,6 +25,9 @@ class Hash
 
   DistanceTo: (hash) ->
     bitwise-xor @value, hash.value
+
+  Value: ->
+    @value.toString it || \hex
 
   @CreateRandom = -> new this crypto.randomBytes @LENGTH / 8
 
