@@ -9,31 +9,31 @@ class Node
     @lastSeen = new Date
     @firstSeen = new Date
 
-  Ping: (done) ->
+  Ping: (done = ->) ->
     @_SendMessage msg: \PING, (err, res) ->
       return done err if err?
 
       done null, res.value
 
-  FindNode: (hash, done) ->
+  FindNode: (hash, done = ->) ->
     @_SendMessage msg: \FIND_NODE value: hash.value, (err, res) ->
       return done err if err?
 
       done null, res.value
 
-  FindValue: (hash, done) ->
+  FindValue: (hash, done = ->) ->
     @_SendMessage msg: \FIND_VALUE value: hash.value, (err, res) ->
       return done err if err?
 
       done null, res.value
 
-  Store: (key, value, done) ->
+  Store: (key, value, done = ->) ->
     @_SendMessage msg: \STORE value: {value, key}, (err, res) ->
       return done err if err?
 
       done null, res.value
 
-  _SendMessage: (obj, done) ->
+  _SendMessage: (obj, done = ->) ->
     obj.sender = @self{hash, port} <<< ip: \localhost
 
     client = net.connect ip: @ip, port: @port, ->
