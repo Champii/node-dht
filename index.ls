@@ -22,14 +22,24 @@ class DhtNode extends EventEmitter
     # console.log "Own hash: " @hash
     @routing = new Routing @
 
-    @server = net.createServer ~>
-      @SetProtocole it
+    @server = net.createServer @~SetProtocole
 
-    @server.on \error console.error
+    @server.on \error -> console.log 'Server error' it
     @server.listen @port
 
     if bootstrapIp and bootstrapPort
       @Bootstrap bootstrapIp, bootstrapPort
+
+  #   @timer = setInterval ~>
+  #     @ReplicateStore!
+  #   , 1000
+  #
+  # ReplicateStore: ->
+  #   pairs = obj-to-pairs @store
+  #   async.map pairs, (pair, done) ~>
+  #     @Store pair.0, pair.1, done
+  #   , (err, done) ->
+  #     console.log err if err?
 
   ExitHandler: ->
     console.log it.stack
@@ -38,13 +48,22 @@ class DhtNode extends EventEmitter
 
   Bootstrap: (ip, port) ->
     node = new Node ip, port, null, @
-    node.Ping (err) ~>
-      # console.log 'Bootstrap start'
+    node.Connect (err) ~>
       return console.error err if err?
 
-      @Find @hash, \FindNode (err, bucket) ~>
-        @emit \bootstraped
-        # console.log 'Bootstrap Finish'
+      node.Ping (err, value) ~>
+        # console.log 'Bootstrap start'
+        return console.error err if err?
+
+        node.hash = (new Hash value.sender.hash.value.data)
+
+        @routing.StoreNode node
+
+        @Find @hash, \FindNode (err, bucket) ~>
+          return console.error err if err?
+
+          @emit \bootstraped
+          # console.log 'Bootstrap Finish'
 
   FindNode: (hash, done) ->
     @Find hash, \FindNode, done
@@ -60,31 +79,36 @@ class DhtNode extends EventEmitter
     best = []
     rejected = []
     findQueue = async.queue (node, done) ~>
-      @routing.StoreNode node
+      # @routing.StoreNode node
       node[method] hash, (err, res) ~>
-        return if err?
+        return done! if err?
 
         if res.key?
           findQueue.kill!
           finalDone null, null, res.value
           finalDone := ->
 
+        # console.log 'Found' res
         res
           |> map ~> Node.Deserialize it, @
+          |> filter ~> not @routing~HasNode it
           |> filter ~> it.hash.value !== @hash.value
           |> filter (node) ~> not find (~> it.hash.value === node.hash.value), rejected ++ best
-          |> map ~>
-            if best.length < Hash.LENGTH
-              best.push it
-              findQueue.push it
-            else
-              max = maximum-by (~> it.hash.DistanceTo hash), best
-              if max.hash.DistanceTo(hash) > it.hash.DistanceTo(hash)
-                rejected.push best.splice (find-index (-> it.hash.value === max.hash.value), best), 1
-                best.push it
-                findQueue.push it
+          |> map (node) ~>
+            node.Connect (err) ~>
+              return console.error err if err
+
+              if best.length < Hash.LENGTH
+                best.push node
+                findQueue.push node
               else
-                rejected.push it
+                max = maximum-by (~> it.hash.DistanceTo hash), best
+                if max.hash.DistanceTo(hash) > node.hash.DistanceTo(hash)
+                  rejected.push best.splice (find-index (-> it.hash.value === max.hash.value), best), 1
+                  best.push node
+                  findQueue.push node
+                else
+                  rejected.push node
 
         done!
     , 3
@@ -99,11 +123,14 @@ class DhtNode extends EventEmitter
 
     @FindNode key, (err, bucket) ~>
       return done err if err?
+      # console.log 'FOUND' err, bucket
 
       async.map bucket, (node, done) ~>
         node.Store key, value, (err, res) -> done null err || res
       , (err, res) ->
-        done null, "Ok (#{filter (-> it is \Ok ), res .length})"
+        # return done err if err?
+
+        done null, "Ok (#{filter (-> it is \Ok ), res .length}/ #{res.length})"
 
   StoreLocal: ({{key, value: v}:value}) ->
     key = Hash.Deserialize key
@@ -121,20 +148,32 @@ class DhtNode extends EventEmitter
   SetProtocole: (client) ->
     client.on \data ~>
       it = JSON.parse it
-      @routing.StoreNode Node.Deserialize it.sender, @
+      # console.log 'Request' it
+      node = Node.Deserialize it.sender, @
 
-      switch it.msg
-        | \PING       => @Send client, msg: \PONG
-        | \FIND_NODE  => @Send client, msg: \FOUND_NODE value: map (.Serialize!), @routing.FindNode new Hash it.value
-        | \STORE      => @Send client, msg: \STORED value: @StoreLocal it
-        | \FIND_VALUE =>
-          [value, bucket] = @FindValueLocal it
+      cb = (err) ~>
+        return console.error err if err?
 
-          if value?
-            @Send client, msg: \FOUND_VALUE value: key: it.value, value: value
-          else if bucket?
-            @Send client, msg: \FOUND_NODE value: map (.Serialize!), bucket
-        | _           => @emit \unknownMsg, it
+        switch it.msg
+          | \PING       => @Send client, msg: \PONG
+          | \FIND_NODE  => @Send client, msg: \FOUND_NODE value: map (.Serialize!), @routing.FindNode new Hash it.value
+          | \STORE      => @Send client, msg: \STORED value: @StoreLocal it
+          | \FIND_VALUE =>
+            [value, bucket] = @FindValueLocal it
+
+            if value?
+              @Send client, msg: \FOUND_VALUE value: key: it.value, value: value
+            else if bucket?
+              @Send client, msg: \FOUND_NODE value: map (.Serialize!), bucket
+          | _           => @emit \unknownMsg, it
+
+
+      if @routing.FindOneNode node.hash
+        node = that
+        cb!
+      else
+        node.Connect cb
+
 
     client.on \error console.error
 

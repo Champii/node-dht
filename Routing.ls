@@ -4,9 +4,10 @@ require! {
 
 class Routing
 
-  @k = Hash.LENGTH / 8
+  @k = Hash.LENGTH / 8bits
 
   (@self) ->
+    @blackList = []
     @lists = map (-> []), [til Hash.LENGTH + 1]
 
   HasNode: (node) ->
@@ -30,8 +31,14 @@ class Routing
 
     bucket
 
+  #Returns one node
+  FindOneNode: (hash) ->
+    @lists
+      |> flatten
+      |> find (.hash.value === hash.value)
+
   StoreNode: (node) ->
-    if @HasNode node
+    if not node.hash? or not node.ready or @HasNode node or @IsBlacklisted node
       return
 
     bucketNb = node.hash.CountSameBits @self.hash
@@ -39,6 +46,21 @@ class Routing
       @_ReplaceIfPossible bucketNb, node
     else
       @lists[bucketNb].push node
+
+    console.log 'Stored Node' node.ip, node.port
+
+    node.once \disconnected ~>
+      bef = @lists[bucketNb].length
+      @lists[bucketNb] = reject (=== node), @lists[bucketNb]
+      console.log 'Removed' node.ip, node.port
+      aft = @lists[bucketNb].length
+      @blackList.push node{ip, port}
+      # if bef is aft
+      #   throw new Error 'WHESH WTF'
+
+  IsBlacklisted: (node) ->
+    @blackList
+      |> find (=== node{ip, port})
 
   _ReplaceIfPossible: (bucketNb, node) ->
     oldestNode = @lists[bucketNb] |> minimum-by (.lastSeen)
