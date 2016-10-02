@@ -155,16 +155,16 @@ class DhtNode extends EventEmitter
         return console.error err if err?
 
         switch it.msg
-          | \PING       => @Send client, msg: \PONG
-          | \FIND_NODE  => @Send client, msg: \FOUND_NODE value: map (.Serialize!), @routing.FindNode new Hash it.value
-          | \STORE      => @Send client, msg: \STORED value: @StoreLocal it
+          | \PING       => @Send client, answerTo: it.msgHash, msg: \PONG
+          | \FIND_NODE  => @Send client, answerTo: it.msgHash, msg: \FOUND_NODE value: map (.Serialize!), @routing.FindNode new Hash it.value
+          | \STORE      => @Send client, answerTo: it.msgHash, msg: \STORED value: @StoreLocal it
           | \FIND_VALUE =>
             [value, bucket] = @FindValueLocal it
 
             if value?
-              @Send client, msg: \FOUND_VALUE value: key: it.value, value: value
+              @Send client, answerTo: it.msgHash, msg: \FOUND_VALUE value: key: it.value, value: value
             else if bucket?
-              @Send client, msg: \FOUND_NODE value: map (.Serialize!), bucket
+              @Send client, answerTo: it.msgHash, msg: \FOUND_NODE value: map (.Serialize!), bucket
           | _           => @emit \unknownMsg, it
 
 
@@ -178,7 +178,10 @@ class DhtNode extends EventEmitter
     client.on \error console.error
 
   Send: (client, obj) ->
+    obj.timestamp = new Date
     obj.sender = @{hash, port} <<< ip: \localhost
+    obj.msgHash = Hash.Create(JSON.stringify obj).Value!
+
     client.write JSON.stringify obj
 
 DhtNode.Hash = Hash

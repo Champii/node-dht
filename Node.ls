@@ -34,6 +34,7 @@ class Node extends EventEmitter
     @lastSeen = new Date
     @firstSeen = new Date
     @connecting = false
+    @waitingAnswers = {}
 
     # @ping_timer = setInterval @~Ping, 10000
     # console.log 'NEW NODE' @ip, @port
@@ -45,7 +46,7 @@ class Node extends EventEmitter
       return
 
     @connecting = true
-    console.log 'Connect' @ip, @port
+    # console.log 'Connect' @ip, @port
     @client = new net.Socket
     @client.setConnTimeout 5000ms
     # console.log 'CreateConnection' @{ip, port}
@@ -82,8 +83,26 @@ class Node extends EventEmitter
       done 'timeoutConnect'
       done := ->
 
+    @client.on \data ~>
+      it = JSON.parse it.toString!
+
+      if not @waitingAnswers[it.answerTo]?
+        return console.error 'UNKNOWN MESSAGE TO ANSWER'
+
+      answerTo = @waitingAnswers[it.answerTo]
+
+      if answerTo.msgHash isnt it.answerTo
+        delete @waitingAnswers[it.answerTo]
+        return console.error 'BAD ANSWER'
+
+      @lastSeen = new Date
+      clearTimeout answerTo.timer
+
+      answerTo.done null, it
+
+
     @client.connect @{ip, port}, ~>
-      console.log 'Connected' @ip, @port
+      # console.log 'Connected' @ip, @port
       @ready = true
       @self.routing.StoreNode @
       done!
@@ -119,18 +138,20 @@ class Node extends EventEmitter
       console.log 'NOT READY' obj
       return
 
+    obj.timestamp = new Date
     obj.sender = @self{hash, port} <<< ip: \localhost
-
-    @client.once \data ~>
-      # console.log \data it.toString!
-      # console.log 'Answer' it.toString!
-      @lastSeen = new Date
-      it = JSON.parse it.toString!
-      @self.routing.StoreNode Node.Deserialize it.sender, @self
-      # @client.destroy!
-      done null, it
+    obj.msgHash = Hash.Create(JSON.stringify obj).Value!
 
     @client.write JSON.stringify obj
+
+    obj.done = done
+
+    obj.timer = setTimeout ~>
+      console.log 'TIMEOUT request'
+      @Disconnect!
+    , 10000
+
+    @waitingAnswers[obj.msgHash] = obj
 
 
   Disconnect: ->
@@ -145,6 +166,5 @@ class Node extends EventEmitter
 
   @Deserialize = (it, self) ->
     new @ it.ip, it.port, (new Hash it.hash.value.data), self
-
 
 module.exports = Node

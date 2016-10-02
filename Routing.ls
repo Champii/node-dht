@@ -47,7 +47,7 @@ class Routing
     else
       @lists[bucketNb].push node
 
-    console.log 'Stored Node' node.ip, node.port
+    # console.log 'Stored Node' node.ip, node.port
 
     node.once \disconnected ~>
       bef = @lists[bucketNb].length
