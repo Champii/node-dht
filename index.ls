@@ -92,17 +92,11 @@ class DhtNode extends EventEmitter
 
     best = []
     rejected = []
-    # @debug.Log "= Start find: #{hash.Value!} from #{bucket.length} nodes"
-    # console.log 'FIND' method
-    findQueue = async.queue (node, done) ~>
-      # @ConnectNewNode node, best, rejected, findQueue, ->
-      #   console.log &
-      # @routing.StoreNode node
-      # @debug.Log "= Asking #{node.hash.Value!}"
-      node[method] hash, (err, res) ~>
-        # console.log 'find queue', err, res
-        return done! if err? or not res?
 
+    findQueue = async.queue (node, done) ~>
+
+      node[method] hash, (err, res) ~>
+        return done! if err? or not res?
 
         if res.key?
           findQueue.kill!
@@ -113,7 +107,8 @@ class DhtNode extends EventEmitter
 
         nodes = res
           |> map ~> Node.Deserialize it, @
-          # |> filter ~> not @routing.HasNode it
+          |> compact
+          |> filter ~> not @routing.HasNode it
           |> filter ~> it.hash.Value! isnt @hash.Value!
           |> filter (node) ~> not find (~> it.hash.value === node.hash.value), rejected ++ best
 
@@ -125,26 +120,16 @@ class DhtNode extends EventEmitter
         , (err, val) ~>
           done!
 
-
     , 3
 
     each findQueue~push, bucket
 
-    # setTimeout ~>
-    #   findQueue.kill!
-    # , 1000
-
     findQueue.drain = ~>
-      # console.log 'Finish queue', best
-      # @debug.Log "Find finished: #{best.length} nodes"
       finalDone null, best
 
   ConnectNewNode: (node, best, rejected, findQueue, done) ->
-    # console.log 'Connect new node' node.ip, node.port
     cb = (err) ->
-      # console.log 'Connected', node.ip, node.port
       if err
-        # console.error err
         return done!
 
       if best.length < Hash.LENGTH
@@ -162,15 +147,8 @@ class DhtNode extends EventEmitter
       done!
 
     node.Connect cb
-    # else if not node.connecting
-    #   cb!
-    # else if node.connecting
-    #   console.log 'Connecting'
-
 
   Store: (key, value, done) ->
-    # hash = Hash.Create key
-
     @FindNode key, (err, bucket) ~>
       return done err if err?
 
@@ -199,15 +177,10 @@ class DhtNode extends EventEmitter
 
   SetProtocole: (client) ->
     node = Node.Deserialize null, @, client
+    if not node?
+      return
 
-    client.on \error console.error
-
-  # Send: (client, obj) ->
-  #   obj.timestamp = new Date
-  #   obj.sender = @{hash, port} <<< ip: \localhost
-  #   obj.msgHash = Hash.Create(JSON.stringify obj).Value!
-  #
-  #   client.write JSON.stringify obj
+    # client.on \error ->
 
 DhtNode.Hash = Hash
 

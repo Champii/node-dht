@@ -9,7 +9,7 @@ class Routing
 
   (@self) ->
     @debug = new Debug "DHT::Routing", Debug.colors.blue
-    @blackList = []
+    # @blackList = []
     @lists = map (-> []), [til Hash.LENGTH + 1]
 
   HasNode: (node) ->
@@ -42,7 +42,7 @@ class Routing
       |> find (.hash.value === hash.value)
 
   StoreNode: (node) ->
-    if not node.hash? or @HasNode node or @IsBlacklisted node or node.hash.Value! is @self.hash.Value!
+    if not node.hash? or @HasNode node or node.hash.Value! is @self.hash.Value!
       return
 
     bucketNb = node.hash.CountSameBits @self.hash
@@ -59,13 +59,11 @@ class Routing
       @lists[bucketNb] = reject (=== node), @lists[bucketNb]
       @debug.Log "= Removed node: #{node.hash.Value!}"
       aft = @lists[bucketNb].length
-      @blackList.push node{ip, port}
-      # if bef is aft
-      #   throw new Error 'WHESH WTF'
+      # @blackList.push node{ip, port}
 
-  IsBlacklisted: (node) ->
-    @blackList
-      |> find (=== node{ip, port})
+  # IsBlacklisted: (node) ->
+  #   @blackList
+  #     |> find (=== node{ip, port})
 
   _ReplaceIfPossible: (bucketNb, node) ->
     oldestNode = @lists[bucketNb] |> minimum-by (.lastSeen)

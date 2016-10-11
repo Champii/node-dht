@@ -42,7 +42,7 @@ class Node extends EventEmitter
     @self.routing.StoreNode @
 
     if @client
-      @debug.Error "X Already existing client !!"
+      @debug.Warn "? Already existing client !!"
       @ready = true
       # console.log 'CLIENT EXISTS'
       @SetListener!
@@ -56,13 +56,13 @@ class Node extends EventEmitter
 
     @debug.Log "= New node instantiated " + if @ip and @port then "#{@ip}:#{@port}" else ""
 
-    # @ping_timer = setInterval @~Ping, 1000
+    @ping_timer = setInterval @~Ping, 10000ms #10s
     # console.log 'NEW NODE' @ip, @port
 
     # @Connect!
 
 
-  SetListener: ->
+  SetListener: (done = (->)) ->
     @client.on \data ~>
       it = JSON.parse it.toString!
 
@@ -95,6 +95,28 @@ class Node extends EventEmitter
         else
           @self.emit \unknownMsg, it
 
+    @client.once \error ~>
+      @debug.Error it
+
+      @Disconnect!
+      done 'Error'
+      done := ->
+
+    @client.once \timeout ~>
+      @debug.Error "X Request timeout"
+
+      @Disconnect!
+      done 'timeout'
+      done := ->
+
+    @client.once \connect_timeout ~>
+      @debug.Error "X Connection timeout"
+
+      @Disconnect!
+      done 'timeoutConnect'
+      done := ->
+
+
   Connect: (done = ->) ->
     if @connecting or @ready
       @debug.Warn "? Already connected: #{@hash.Value!}"
@@ -104,40 +126,9 @@ class Node extends EventEmitter
     # console.log 'Connect' @ip, @port
     @client = new net.Socket
     @client.setConnTimeout 1000ms
-    # console.log 'CreateConnection' @{ip, port}
-    # @client = net.createConnection @{ip, port}, ~>
-    #   console.log 'Conneccted'
 
     # @client.setTimeout 600000ms #10mn
-    # @client.setTimeout 10000ms #10sec
-
-    @client.once \error ~>
-      # console.log 'ERROR' it
-      @debug.Error it
-      # if @client.destroyed
-      #   return
-      #
-      @Disconnect!
-      done 'Error'
-      done := ->
-
-    @client.once \timeout ~>
-      @debug.Error "X Request timeout"
-      # if @client.destroyed
-      #   return
-      #
-      @Disconnect!
-      done 'timeout'
-      done := ->
-
-    @client.once \connect_timeout ~>
-      @debug.Error "X Connection timeout"
-      # if @client.destroyed
-      #   return
-
-      @Disconnect!
-      done 'timeoutConnect'
-      done := ->
+    @client.setTimeout 6000ms #10sec
 
     @debug.Log "> Connecting to #{@ip}:#{@port}..."
     @client.connect @{ip, port}, ~>
@@ -165,8 +156,6 @@ class Node extends EventEmitter
     @_SendMessage msg: \FIND_NODE value: hash.value, (err, res) ~>
       return done err if err?
 
-      # console.log 'WHAT', err, res
-
       @debug.Log "< Found node: #{res?value?length}"
       done null, res?value
 
@@ -175,7 +164,6 @@ class Node extends EventEmitter
     @_SendMessage msg: \FIND_VALUE value: hash.value, (err, res) ~>
       return done err if err?
 
-      # console.log 'FOUND' res
       @debug.Log "< Found value: #{res?value?length}"
       done null, res.value
 
@@ -240,13 +228,10 @@ class Node extends EventEmitter
 
     @waitingAnswers[obj.msgHash] = obj
 
-
   Disconnect: ->
     clearInterval @ping_timer
     @client.destroy! if not @client?.destroyed
     @emit 'disconnected'
-    # console.log 'Disconnected: ' @ip, @port
-
 
   Serialize: ->
     @{hash, ip, port}
@@ -256,6 +241,10 @@ class Node extends EventEmitter
       new @ null, null, null, self, client
     else
       hash = (new Hash it.hash.value.data)
+
+      if hash.Value! is self.hash.Value!
+        return null
+
       found = self.routing.FindOneNode hash
       if found?
         that
