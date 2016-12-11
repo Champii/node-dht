@@ -32,6 +32,7 @@ class Node extends EventEmitter
     if is-type \String @port
       @port = +@port
 
+    @nonce = 0
     @ready = false
     @destroyed = false
     @lastSeen = new Date
@@ -41,7 +42,7 @@ class Node extends EventEmitter
 
     @self.routing.StoreNode @
 
-    if @client
+    if @client?
       @debug.Warn "? Already existing client !!"
       @ready = true
       # console.log 'CLIENT EXISTS'
@@ -56,7 +57,7 @@ class Node extends EventEmitter
 
     @debug.Log "= New node instantiated " + if @ip and @port then "#{@ip}:#{@port}" else ""
 
-    @ping_timer = setInterval @~Ping, 10000ms #10s
+    @ping_timer = setInterval @~Ping, self.config.pingInterval * 1000
     # console.log 'NEW NODE' @ip, @port
 
     # @Connect!
@@ -64,42 +65,17 @@ class Node extends EventEmitter
 
   SetListener: (done = (->)) ->
     @client.on \data ~>
-      it = JSON.parse it.toString!
-
-      if not @hash?
-        # console.log 'not hash' it
-        @ <<< it.sender{ip, port, hash}
-        @hash = new Hash @hash.value.data
-        @debug = new Debug "DHT::Node::#{@hash.Value!}", Debug.colors.cyan
-        @self.routing.StoreNode @
-
-      if it.answerTo?
-        if not @waitingAnswers[it.answerTo]?
-          @debug.Error "X Unknown message to answer to"
-          return
-
-        answerTo = @waitingAnswers[it.answerTo]
-
-        if answerTo.msgHash isnt it.answerTo
-          delete @waitingAnswers[it.answerTo]
-          @debug.Error "X Bad answer"
-          return
-
-        @lastSeen = new Date
-      #   clearTimeout answerTo.timer
-
-        answerTo.done null, it
-      else
-        if @protocole[it.msg]?
-          that it
-        else
-          @self.emit \unknownMsg, it
+      arr = it.toString!
+        |> split '\0'
+        |> compact
+        |> map JSON.parse
+        |> each @~HandleReceive
 
     @client.once \error ~>
-      @debug.Error it
+      @debug.Error 'X ' + it
 
       @Disconnect!
-      done 'Error'
+      done 'Error' + it
       done := ->
 
     @client.once \timeout ~>
@@ -116,6 +92,39 @@ class Node extends EventEmitter
       done 'timeoutConnect'
       done := ->
 
+  HandleReceive: ->
+    if not @hash?
+      @ <<< it.sender{ip, port, hash}
+      @hash = new Hash @hash.value.data
+      @debug = new Debug "DHT::Node::#{@hash.Value!}", Debug.colors.cyan
+      @self.routing.StoreNode @
+
+    if it.answerTo?
+      if not @waitingAnswers[it.answerTo]?
+        @debug.Error "X Unknown message to answer to"
+        return
+
+      answerTo = @waitingAnswers[it.answerTo]
+
+      if answerTo.answered
+        return console.error 'ALREADY ANSWERED ????' answerTo
+
+      if answerTo.msgHash isnt it.answerTo
+        delete @waitingAnswers[it.answerTo]
+        @debug.Error "X Bad answer"
+        return
+
+      @lastSeen = new Date
+      clearTimeout answerTo.timer
+
+      answerTo.done null, it
+      answerTo.answered = true
+    else
+      if @protocole[it.msg]?
+        that it
+      else
+        @self.emit \unknownMsg, it
+
 
   Connect: (done = ->) ->
     if @connecting or @ready
@@ -123,19 +132,19 @@ class Node extends EventEmitter
       return done!
 
     @connecting = true
-    # console.log 'Connect' @ip, @port
+
     @client = new net.Socket
-    @client.setConnTimeout 1000ms
+    @client.setConnTimeout @self.config.connectTimeout * 1000
 
     # @client.setTimeout 600000ms #10mn
-    @client.setTimeout 6000ms #10sec
+    # @client.setTimeout 6000ms #6sec
 
+    @SetListener -> done!
     @debug.Log "> Connecting to #{@ip}:#{@port}..."
     @client.connect @{ip, port}, ~>
       @debug.Log "< Connected to #{@ip}:#{@port}..."
       @ready = true
       @connecting = false
-      @SetListener!
       done!
       done := ->
 
@@ -168,11 +177,11 @@ class Node extends EventEmitter
       done null, res.value
 
   Store: (key, value, done = ->) ->
-    @debug.Log "> Store: #{key} -> #{value}"
+    @debug.Log "> Store: #{key.Value!} -> #{value}"
     @_SendMessage msg: \STORE value: {value, key}, (err, res) ~>
       return done err if err?
 
-      @debug.Log "< Stored: #{key} -> #{value}"
+      @debug.Log "< Stored: #{key.Value!} -> #{value}"
       done null, res.value
 
   ###
@@ -211,15 +220,19 @@ class Node extends EventEmitter
   _SendMessage: (obj, done = (->)) ->
     if not @ready
       @debug.Warn "Not ready: #{@ip}:#{@port}"
-      return done!
+      return done 'not ready'
 
-    obj.timestamp = new Date
+    obj.nonce = @nonce++
+    obj.timestamp = new Date().getTime!
     obj.sender = @self{hash, port} <<< ip: \localhost
     obj.msgHash = Hash.Create(JSON.stringify obj).Value!
 
-    @client.write JSON.stringify obj
+    @client.write (JSON.stringify obj) + '\0'
 
     obj.done = done
+
+    if @nonce > 10000
+      @nonce = 0
 
     # obj.timer = setTimeout ~>
     #   console.log 'TIMEOUT request' obj
@@ -232,23 +245,24 @@ class Node extends EventEmitter
     clearInterval @ping_timer
     @client.destroy! if not @client?.destroyed
     @emit 'disconnected'
+    @ready = false
 
   Serialize: ->
     @{hash, ip, port}
 
-  @Deserialize = (it, self, client) ->
-    if not it?
+  @Deserialize = (info, self, client) ->
+    if not info?
       new @ null, null, null, self, client
     else
-      hash = (new Hash it.hash.value.data)
+      hash = (new Hash info.hash.value.data)
 
       if hash.Value! is self.hash.Value!
         return null
 
       found = self.routing.FindOneNode hash
-      if found?
+      if found
         that
       else
-        new @ it.ip, it.port, hash, self, client
+        new @ info.ip, info.port, hash, self, client
 
 module.exports = Node

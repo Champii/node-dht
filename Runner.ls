@@ -23,16 +23,29 @@ class Runner
       | \p => @Put (it.toString!split ' ')
       | \g => @Get (it.toString!split ' ')
       | \s => @DisplayStore!
+      | \i => @DisplayInfo!
       | '' => process.stdout.write '> '
       | _  => process.stdout.write "Unknown command. Type 'h' for help\n> "
 
   DisplayHelp: ->
     console.log "
-       h           -- help    -- Display this help                   \n
-       g KEY       -- get     -- Get a value from a key              \n
-       p KEY VALUE -- put     -- Put a key/value pair                \n
-       s           -- storage -- Display localy stored keys/values   \n
-       r           -- routing -- Display local routing table
+      ----------------------------------------------------------------\n
+      - h           -- help    -- Display this help                   \n
+      - g KEY       -- get     -- Get a value from a key              \n
+      - p KEY VALUE -- put     -- Put a key/value pair                \n
+      - s           -- storage -- Display localy stored keys/values   \n
+      - r           -- routing -- Display local routing table         \n
+      - i           -- infos   -- Display general node infos          \n
+      ----------------------------------------------------------------\n
+    "
+
+    process.stdout.write '> '
+
+  DisplayInfo: ->
+    console.log "
+      Hash:             #{@node.hash.Value!}                                    \n
+      Connected nodes:  #{flatten @node.routing.lists .length}                  \n
+      Stored keys:      #{keys @node.store .length} (#{(@node.calcStoreSize! / 2^7) .toFixed 1 }Ko) \n
     "
     process.stdout.write '> '
 
@@ -43,7 +56,7 @@ class Runner
 
   DisplayRouting: ->
     for bucket, i in @node.routing.lists
-      for node in bucket
+      for node in bucket when node.ready
         console.log "#{i} : #{node.hash.value.toString \hex }"
     process.stdout.write '> '
 

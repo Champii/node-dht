@@ -10,13 +10,20 @@ require! {
   \./Node
 }
 
+defaultConfig =
+  maxStoreSize:        1Mo
+  replicationInterval: 600sec
+  pingInterval:        600sec
+  connectTimeout:      10sec
+
 class DhtNode extends EventEmitter
 
-  (@port = 12345, bootstrapIp, bootstrapPort) ->
+  (@port = 12345, bootstrapIp, bootstrapPort, @config = {}) ->
     @store = {}
 
-    @debug = new Debug 'DHT::Main', Debug.colors.green
+    @config = defaultConfig <<< @config
 
+    @debug = new Debug 'DHT::Main', Debug.colors.green
 
     # process.on 'exit' @~ExitHandler
     # process.on 'SIGINT' @~ExitHandler
@@ -44,16 +51,18 @@ class DhtNode extends EventEmitter
     else
       @debug.Log "Starting in mode bootstrap"
 
-  #   @timer = setInterval ~>
-  #     @ReplicateStore!
-  #   , 1000
-  #
-  # ReplicateStore: ->
-  #   pairs = obj-to-pairs @store
-  #   async.map pairs, (pair, done) ~>
-  #     @Store pair.0, pair.1, done
-  #   , (err, done) ->
-  #     console.log err if err?
+    @timer = setInterval ~>
+      @ReplicateStore!
+    , @config.replicationInterval * 1000
+
+  ReplicateStore: ->
+    pairs = obj-to-pairs @store
+    async.map pairs, ([key, value], done) ~>
+      key = new Hash key
+
+      @Store key, value, done
+    , (err) ->
+      console.log err if err?
 
   ExitHandler: ->
     console.log it.stack
@@ -95,10 +104,13 @@ class DhtNode extends EventEmitter
 
     findQueue = async.queue (node, done) ~>
 
+      a = 1
       node[method] hash, (err, res) ~>
+        console.log a++ if a > 1
         return done! if err? or not res?
 
         if res.key?
+          @debug.Warn "Found key"
           findQueue.kill!
           finalDone null, null, res.value
           finalDone := ->
@@ -108,7 +120,8 @@ class DhtNode extends EventEmitter
         nodes = res
           |> map ~> Node.Deserialize it, @
           |> compact
-          |> filter ~> not @routing.HasNode it
+          # |> filter ~> not @routing.HasNode it
+          # |> each console.log
           |> filter ~> it.hash.Value! isnt @hash.Value!
           |> filter (node) ~> not find (~> it.hash.value === node.hash.value), rejected ++ best
 
@@ -118,7 +131,7 @@ class DhtNode extends EventEmitter
         async.mapSeries nodes, (node, done) ~>
           @ConnectNewNode node, best, rejected, findQueue, done
         , (err, val) ~>
-          done!
+          done err
 
     , 3
 
@@ -163,6 +176,11 @@ class DhtNode extends EventEmitter
     @store[key.value.toString \hex] = v
     @debug.Log "= Stored localy: #{key.Value!}"
     \Ok
+
+  calcStoreSize: ->
+    @store
+      |> obj-to-pairs
+      |> fold ((i, j) -> i + j.0.length + j.1.length), 0
 
   FindValueLocal: (key) ->
     key = Hash.Deserialize key
