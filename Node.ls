@@ -6,6 +6,7 @@ require! {
 }
 
 net.Socket.prototype._orig_connect = net.Socket.prototype.connect
+
 net.Socket.prototype.connect = ->
   if typeof @conn_timeout isnt 'undefined' && @conn_timeout > 0
     @addListener 'connect', ~>
@@ -26,7 +27,11 @@ net.Socket.prototype.setConnTimeout = (timeout) ->
 
 class Node extends EventEmitter
 
-  (@ip, @port, @hash, @self, @client) ->
+  # stats
+  @inRequests = 0
+  @outRequests = 0
+
+  (@host, @port, @hash, @self, @client) ->
     @debug = new Debug "DHT::Node::#{@hash?Value! || '(not connected)'}", Debug.colors.cyan
 
     if is-type \String @port
@@ -55,17 +60,32 @@ class Node extends EventEmitter
       FIND_NODE:  @~FoundNode
       FIND_VALUE: @~FoundValue
 
-    @debug.Log "= New node instantiated " + if @ip and @port then "#{@ip}:#{@port}" else ""
+    @debug.Log "= New node instantiated " + if @host and @port then "#{@host}:#{@port}" else ""
 
-    @ping_timer = setInterval @~Ping, self.config.pingInterval * 1000
-    # console.log 'NEW NODE' @ip, @port
+    @ping_timer = setInterval @~Ping, @self.config.pingInterval * 1000
+    # console.log 'NEW NODE' @host, @port
 
     # @Connect!
 
 
   SetListener: (done = (->)) ->
+    tmpData = ''
+
     @client.on \data ~>
-      arr = it.toString!
+      data = tmpData + it.toString!
+      tmpData := ''
+
+      if not data.includes '\0'
+        tmpData := data
+        return
+      else if data[*-1] isnt '\0'
+        data = compact data.split '\0'
+        tmpData := data.pop!
+        data = data.join '\0'
+
+      # console.log tmpData
+
+      arr = data
         |> split '\0'
         |> compact
         |> map JSON.parse
@@ -93,6 +113,9 @@ class Node extends EventEmitter
       done := ->
 
   HandleReceive: ->
+    Node.inRequests++
+    @ResetTimer!
+
     if not @hash?
       @ <<< it.sender{ip, port, hash}
       @hash = new Hash @hash.value.data
@@ -126,6 +149,10 @@ class Node extends EventEmitter
         @self.emit \unknownMsg, it
 
 
+  ResetTimer: ->
+    clearInterval @ping_timer
+    @ping_timer = setInterval @~Ping, @self.config.pingInterval * 1000
+
   Connect: (done = ->) ->
     if @connecting or @ready
       @debug.Warn "? Already connected: #{@hash.Value!}"
@@ -139,10 +166,10 @@ class Node extends EventEmitter
     # @client.setTimeout 600000ms #10mn
     # @client.setTimeout 6000ms #6sec
 
-    @SetListener -> done!
-    @debug.Log "> Connecting to #{@ip}:#{@port}..."
-    @client.connect @{ip, port}, ~>
-      @debug.Log "< Connected to #{@ip}:#{@port}..."
+    @SetListener (a, b) -> done a, b
+    @debug.Log "> Connecting to #{@host}:#{@port}..."
+    @client.connect @{host, port}, ~>
+      @debug.Log "< Connected to #{@host}:#{@port}..."
       @ready = true
       @connecting = false
       done!
@@ -219,8 +246,10 @@ class Node extends EventEmitter
 
   _SendMessage: (obj, done = (->)) ->
     if not @ready
-      @debug.Warn "Not ready: #{@ip}:#{@port}"
+      @debug.Warn "Not ready: #{@host}:#{@port}"
       return done 'not ready'
+
+    Node.outRequests++
 
     obj.nonce = @nonce++
     obj.timestamp = new Date().getTime!

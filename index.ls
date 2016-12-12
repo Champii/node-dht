@@ -3,6 +3,7 @@ global import require \prelude-ls
 require! {
   net
   async
+  moment
   events : EventEmitter
   \./Debug
   \./Hash
@@ -11,10 +12,14 @@ require! {
 }
 
 defaultConfig =
-  maxStoreSize:        1Mo
+  maxStoreSize:        20Mo
+  maxEntrySize:        1024Ko
+
   replicationInterval: 600sec
   pingInterval:        600sec
   connectTimeout:      10sec
+  concurrentWorkers:   3
+  timerRandomWindow:   10000ms
 
 class DhtNode extends EventEmitter
 
@@ -45,6 +50,8 @@ class DhtNode extends EventEmitter
     @server.listen @port
     @debug.Log "Listening to #{@port}"
 
+    @startDate = new Date
+
     if bootstrapIp and bootstrapPort
       @debug.Log "Bootstraping to #{bootstrapIp}:#{bootstrapPort}"
       @Bootstrap bootstrapIp, bootstrapPort
@@ -53,14 +60,24 @@ class DhtNode extends EventEmitter
 
     @timer = setInterval ~>
       @ReplicateStore!
-    , @config.replicationInterval * 1000
+    , 10000 #10sec
+
+  RandomizeTime: ->
+    (Math.random() * @config.timerRandomWindow) - (@config.timerRandomWindow / 2)
 
   ReplicateStore: ->
     pairs = obj-to-pairs @store
-    async.map pairs, ([key, value], done) ~>
+    async.map pairs, ([key, obj], done) ~>
       key = new Hash key
 
-      @Store key, value, done
+      timeEnd = moment(obj.storedAt).add(@config.replicationInterval, \seconds )
+
+      if timeEnd < moment()
+        @Store key, obj.value, done
+        obj.storedAt = new Date
+      else
+        done!
+
     , (err) ->
       console.log err if err?
 
@@ -72,7 +89,8 @@ class DhtNode extends EventEmitter
   Bootstrap: (ip, port) ->
     node = new Node ip, port, null, @
     node.Connect (err) ~>
-      return console.error err if err?
+      return console.error 'Connect error' err if err?
+
 
       node.Ping (err, value) ~>
         # console.log 'Bootstrap start'
@@ -104,9 +122,7 @@ class DhtNode extends EventEmitter
 
     findQueue = async.queue (node, done) ~>
 
-      a = 1
       node[method] hash, (err, res) ~>
-        console.log a++ if a > 1
         return done! if err? or not res?
 
         if res.key?
@@ -123,24 +139,26 @@ class DhtNode extends EventEmitter
           # |> filter ~> not @routing.HasNode it
           # |> each console.log
           |> filter ~> it.hash.Value! isnt @hash.Value!
-          |> filter (node) ~> not find (~> it.hash.value === node.hash.value), rejected ++ best
+          |> filter (node) ~> not find (~> it?hash?value === node.hash.value), rejected ++ best
 
         if not nodes.length
           return done!
 
         async.mapSeries nodes, (node, done) ~>
-          @ConnectNewNode node, best, rejected, findQueue, done
+          # console.log 'LOL' hash
+          @ConnectNewNode node, best, rejected, findQueue, hash, done
         , (err, val) ~>
           done err
 
-    , 3
+    , @config.concurrentWorkers
 
     each findQueue~push, bucket
 
     findQueue.drain = ~>
       finalDone null, best
 
-  ConnectNewNode: (node, best, rejected, findQueue, done) ->
+  ConnectNewNode: (node, best, rejected, findQueue, hash, done) ->
+    # console.log hash
     cb = (err) ->
       if err
         return done!
@@ -172,22 +190,34 @@ class DhtNode extends EventEmitter
 
   StoreLocal: ({{key, value: v}:value}) ->
     key = Hash.Deserialize key
+    entrySize = (key.Value!length + v.length) / 1024 #ko
+    storeSize = @calcStoreSize! / 1024 / 1024 #mo
+    # console.log storeSize, entrySize / 1024, @config.maxStoreSize
 
-    @store[key.value.toString \hex] = v
+    if entrySize > @config.maxEntrySize
+      return @debug.Warn "! Impossible to store entry: Entry is too big: #{entrySize}Ko. Max is #{@config.entrySize}"
+
+    if storeSize + (entrySize / 1024) > @config.maxStoreSize
+      return @debug.Warn "! Impossible to store entry: store is full (#{storeSize.toFixed 2}/#{@config.maxStoreSize}Mo)"
+
+    @store[key.value.toString \hex] =
+      value: v
+      storedAt: moment!.add @RandomizeTime!, 'milliseconds'
+
     @debug.Log "= Stored localy: #{key.Value!}"
     \Ok
 
   calcStoreSize: ->
     @store
       |> obj-to-pairs
-      |> fold ((i, j) -> i + j.0.length + j.1.length), 0
+      |> fold ((i, j) -> i + j.0.length + j.1.value.length), 0
 
   FindValueLocal: (key) ->
     key = Hash.Deserialize key
 
     if @store[key.value.toString \hex]?
       @debug.Log "= Found value localy: #{key.Value!}"
-      [that,]
+      [that.value,]
     else
       nodes = @routing.FindNode key
       @debug.Log "= Local value not found: forward -> #{nodes.length} nodes"
